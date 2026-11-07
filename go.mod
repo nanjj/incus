@@ -29,7 +29,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gopacket/gopacket v1.7.5
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/gosexy/gettext v0.0.0-20160830220431-74466a0a0c4a
 	github.com/insomniacslk/dhcp v0.0.0-20261014062924-c6bb46ad3f3a
 	github.com/jaypipes/pcidb v1.1.1
 	github.com/jochenvg/go-udev v0.0.0-20240801134859-b65ed646224b
