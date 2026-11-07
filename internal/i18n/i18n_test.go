@@ -1,6 +1,7 @@
 package i18n
 
 import (
+	"sync"
 	"testing"
 )
 
@@ -80,3 +81,61 @@ func TestDetectLanguage(t *testing.T) {
 		}
 	}
 }
+
+// TestCatalogueNames covers the alias chain, especially the Chinese
+// region-to-script mapping that the region-named catalogues require.
+func TestCatalogueNames(t *testing.T) {
+	cases := []struct {
+		lang string
+		want []string
+	}{
+		{"zh_CN", []string{"zh_CN", "zh_Hans", "zh"}},
+		{"zh_TW", []string{"zh_TW", "zh_Hant", "zh"}},
+		{"zh_Hans", []string{"zh_Hans", "zh"}},
+		{"no_NO", []string{"no_NO", "nb_NO", "no", "nb"}},
+		{"nn_NO", []string{"nn_NO", "nn"}},
+		{"pt_BR", []string{"pt_BR", "pt"}},
+		{"fr_FR", []string{"fr_FR", "fr"}},
+	}
+
+	for _, c := range cases {
+		got := catalogueNames(c.lang)
+		if len(got) != len(c.want) {
+			t.Errorf("catalogueNames(%q) = %v, want %v", c.lang, got, c.want)
+
+			continue
+		}
+
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("catalogueNames(%q) = %v, want %v", c.lang, got, c.want)
+
+				break
+			}
+		}
+	}
+}
+
+// TestGTranslatesChinese is the regression test for the bug this mapping
+// fixes: a zh_CN locale used to fall back to English because no zh_CN.po
+// exists, only zh_Hans.po.
+func TestGTranslatesChinese(t *testing.T) {
+	for _, lang := range []string{"zh_CN", "zh_SG", "zh_Hans"} {
+		t.Setenv("LANGUAGE", "")
+		t.Setenv("LC_ALL", "")
+		t.Setenv("LC_MESSAGES", "")
+		t.Setenv("LANG", lang+".UTF-8")
+
+		// Reset the package cache so load() runs again.
+		once = sync.Once{}
+		entries = nil
+
+		got := G("Description:")
+		if got == "Description:" {
+			t.Errorf("LANG=%s: still untranslated", lang)
+		}
+	}
+}
+
+// TestCatalogueNames covers the alias chain, especially the Chinese
+// region-to-script mapping that the region-named catalogues require.
