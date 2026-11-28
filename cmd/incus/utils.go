@@ -955,6 +955,10 @@ func randName(prefix string, length int, suffix string) string {
 // nbdListen sets up the local NBD listener, defaulting to a private unix socket.
 func nbdListen(conf *config.Config, address string) (net.Listener, error) {
 	if address != "" {
+		if filepath.IsAbs(address) {
+			return net.Listen("unix", address)
+		}
+
 		return net.Listen("tcp", address)
 	}
 
