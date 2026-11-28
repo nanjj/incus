@@ -13,10 +13,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"slices"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -320,8 +321,10 @@ func (c *cmdLowLevelNBD) run(cmd *cobra.Command, args []string) error {
 	// Track the active connections, the first one starts the NBD session and the
 	// following ones attach to it. The server stops the session when all of its
 	// connections are closed.
-	var connMu sync.Mutex
-	activeConns := 0
+	activeConns := &atomic.Int32{}
+	openNBDConn := func(reuse bool) (conn net.Conn, err error) {
+		return d.GetInstanceNBDConn(instanceName, incus.InstanceNBDArgs{Reuse: reuse})
+	}
 
 	for {
 		// Wait for a connection.
@@ -330,54 +333,7 @@ func (c *cmdLowLevelNBD) run(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf(i18n.G("Failed to accept incoming connection: %w"), err)
 		}
 
-		go func() {
-			defer func() { _ = nConn.Close() }()
-
-			fmt.Printf(i18n.G("NBD client connected %q")+"\n", nConn.RemoteAddr())
-			defer fmt.Printf(i18n.G("NBD client disconnected %q")+"\n", nConn.RemoteAddr())
-
-			connMu.Lock()
-			reuse := activeConns > 0
-			activeConns++
-			connMu.Unlock()
-
-			defer func() {
-				connMu.Lock()
-				activeConns--
-				connMu.Unlock()
-			}()
-
-			// Get a connection to the NBD session.
-			conn, err := d.GetInstanceNBDConn(instanceName, incus.InstanceNBDArgs{Reuse: reuse})
-			if err != nil {
-				fmt.Printf(i18n.G("NBD connection failed: %v")+"\n", err)
-				return
-			}
-
-			defer func() { _ = conn.Close() }()
-
-			// Proxy the traffic.
-			var wg sync.WaitGroup
-			wg.Add(2)
-
-			go func() {
-				defer wg.Done()
-
-				_, _ = util.SafeCopy(conn, nConn)
-				_ = conn.Close()
-				_ = nConn.Close()
-			}()
-
-			go func() {
-				defer wg.Done()
-
-				_, _ = util.SafeCopy(nConn, conn)
-				_ = conn.Close()
-				_ = nConn.Close()
-			}()
-
-			wg.Wait()
-		}()
+		go nbdHandle(nConn, activeConns, openNBDConn)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
@@ -990,4 +991,50 @@ func nbdListen(conf *config.Config, address string) (net.Listener, error) {
 	}
 
 	return net.Listen("unix", f.Name())
+}
+
+// nbdHandle handle nbd connections.
+func nbdHandle(conn net.Conn, activeConns *atomic.Int32, openNBDConn func(bool) (net.Conn, error)) {
+	defer func() { _ = conn.Close() }()
+
+	fmt.Printf(i18n.G("NBD client connected %q")+"\n", conn.RemoteAddr())
+	defer fmt.Printf(i18n.G("NBD client disconnected %q")+"\n", conn.RemoteAddr())
+
+	reuse := activeConns.Load() > 0
+	activeConns.Add(1)
+
+	defer func() {
+		activeConns.Add(-1)
+	}()
+
+	// Get a connection to the NBD session.
+	nbdConn, err := openNBDConn(reuse)
+	if err != nil {
+		fmt.Printf(i18n.G("NBD connection failed: %v")+"\n", err)
+		return
+	}
+
+	defer func() { _ = nbdConn.Close() }()
+
+	// Proxy the traffic.
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		_, _ = util.SafeCopy(nbdConn, conn)
+		_ = nbdConn.Close()
+		_ = conn.Close()
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		_, _ = util.SafeCopy(conn, nbdConn)
+		_ = nbdConn.Close()
+		_ = conn.Close()
+	}()
+
+	wg.Wait()
 }

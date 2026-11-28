@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,7 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -2667,46 +2668,18 @@ func (c *cmdStorageVolumeNBD) Run(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf(i18n.G("NBD listening on %v")+"\n", listener.Addr())
 
-	// Wait for a connection.
-	nConn, err := listener.Accept()
-	if err != nil {
-		return fmt.Errorf(i18n.G("Failed to accept incoming connection: %w"), err)
+	activeConn := &atomic.Int32{}
+	openNBDConn := func(bool) (net.Conn, error) {
+		return d.GetStoragePoolVolumeBlockNBDConn(poolName, volType, volName, incus.StorageVolumeNBDPost{Writable: c.flagWritable})
 	}
 
-	defer logger.WarnOnError(nConn.Close, "Failed to close connection")
+	for {
+		// Wait for a connection.
+		nConn, err := listener.Accept()
+		if err != nil {
+			return fmt.Errorf(i18n.G("Failed to accept incoming connection: %w"), err)
+		}
 
-	fmt.Printf(i18n.G("NBD client connected %q")+"\n", nConn.RemoteAddr())
-	defer fmt.Printf(i18n.G("NBD client disconnected %q")+"\n", nConn.RemoteAddr())
-
-	// Connect to NBD.
-	conn, err := d.GetStoragePoolVolumeBlockNBDConn(poolName, volType, volName, incus.StorageVolumeNBDPost{Writable: c.flagWritable})
-	if err != nil {
-		return fmt.Errorf(i18n.G("NBD connection failed: %v")+"\n", err)
+		nbdHandle(nConn, activeConn, openNBDConn)
 	}
-
-	defer logger.WarnOnError(conn.Close, "Failed to close connection")
-
-	// Proxy the traffic.
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-
-		_, _ = util.SafeCopy(conn, nConn)
-		_ = conn.Close()
-		_ = nConn.Close()
-	}()
-
-	go func() {
-		defer wg.Done()
-
-		_, _ = util.SafeCopy(nConn, conn)
-		_ = conn.Close()
-		_ = nConn.Close()
-	}()
-
-	wg.Wait()
-
-	return nil
 }
