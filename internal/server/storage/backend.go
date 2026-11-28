@@ -11431,6 +11431,7 @@ func (b *backend) connectOfflineNBD(vol drivers.Volume, writable bool) (net.Conn
 	socketPath := filepath.Join(internalUtil.RunPath(fmt.Sprintf("%s-nbd.sock", vol.Name())))
 
 	cmd := exec.Command("qemu-nbd", fmt.Sprintf("--socket=%s", socketPath))
+	cmd.Args = append(cmd.Args, fmt.Sprintf("--export-name=%s", vol.Name()))
 	if !writable {
 		cmd.Args = append(cmd.Args, "--read-only")
 	}
